@@ -7,14 +7,32 @@ import path from "path";
 const sourceFileCache = new Map<string, ts.SourceFile>();
 
 /**
+ * Metadata about enum types
+ */
+export interface EnumMetadata {
+  values: Array<{ name: string; value: string | number }>;
+}
+
+/**
+ * Props generation result with metadata
+ */
+export interface PropsWithMetadata {
+  props: Record<string, any>;
+  metadata: {
+    enums: Record<string, EnumMetadata>;
+  };
+}
+
+/**
  * Generate mock props for a component based on its props interface
  */
 export async function generateProps(
   sourceFile: ts.SourceFile,
   interfaceName: string,
   filePath?: string
-): Promise<Record<string, any>> {
+): Promise<PropsWithMetadata> {
   const props: Record<string, any> = {};
+  const enumMetadata: Record<string, EnumMetadata> = {};
 
   async function visit(node: ts.Node) {
     if (ts.isInterfaceDeclaration(node) && node.name.text === interfaceName) {
@@ -23,7 +41,11 @@ export async function generateProps(
           const propName = member.name.text;
           const propType = member.type;
           if (propType) {
-            props[propName] = await generateValueForType(propType, propName, sourceFile, filePath);
+            const result = await generateValueForType(propType, propName, sourceFile, filePath);
+            props[propName] = result.value;
+            if (result.enumMetadata) {
+              enumMetadata[propName] = result.enumMetadata;
+            }
           }
         }
       }
@@ -34,7 +56,12 @@ export async function generateProps(
   }
 
   await visit(sourceFile);
-  return props;
+  return {
+    props,
+    metadata: {
+      enums: enumMetadata
+    }
+  };
 }
 
 /**
@@ -51,6 +78,58 @@ function findInterfaceDeclaration(
     if (found) result = found;
   });
   return result;
+}
+
+/**
+ * Recursive search for an enum declaration in a node tree
+ */
+function findEnumDeclaration(
+  enumName: string,
+  node: ts.Node
+): ts.EnumDeclaration | undefined {
+  if (ts.isEnumDeclaration(node) && node.name.text === enumName) return node;
+  let result: ts.EnumDeclaration | undefined = undefined;
+  ts.forEachChild(node, child => {
+    const found = findEnumDeclaration(enumName, child);
+    if (found) result = found;
+  });
+  return result;
+}
+
+/**
+ * Get all values from an enum declaration
+ */
+function getAllEnumValues(enumDecl: ts.EnumDeclaration): Array<{ name: string; value: string | number }> {
+  const values: Array<{ name: string; value: string | number }> = [];
+  let nextNumericValue = 0;
+
+  for (const member of enumDecl.members) {
+    const memberName = member.name.getText();
+
+    if (member.initializer) {
+      if (ts.isStringLiteral(member.initializer)) {
+        values.push({ name: memberName, value: member.initializer.text });
+      } else if (ts.isNumericLiteral(member.initializer)) {
+        const numValue = Number(member.initializer.text);
+        values.push({ name: memberName, value: numValue });
+        nextNumericValue = numValue + 1;
+      }
+    } else {
+      // No initializer means it's a numeric enum
+      values.push({ name: memberName, value: nextNumericValue });
+      nextNumericValue++;
+    }
+  }
+
+  return values;
+}
+
+/**
+ * Get the first value from an enum declaration
+ */
+function getEnumFirstValue(enumDecl: ts.EnumDeclaration): string | number {
+  const values = getAllEnumValues(enumDecl);
+  return values.length > 0 ? values[0].value : 0;
 }
 
 /**
@@ -144,6 +223,14 @@ async function resolveImportPath(importPath: string, currentFilePath?: string): 
 }
 
 /**
+ * Result of generating a value for a type
+ */
+interface GenerateValueResult {
+  value: any;
+  enumMetadata?: EnumMetadata;
+}
+
+/**
  * Generate a mock value for a TypeScript type node
  */
 async function generateValueForType(
@@ -151,53 +238,56 @@ async function generateValueForType(
   propName: string,
   sourceFile: ts.SourceFile,
   currentFilePath?: string
-): Promise<any> {
-  if (type.kind === ts.SyntaxKind.StringKeyword) return generateStringValue(propName);
-  if (type.kind === ts.SyntaxKind.NumberKeyword) return generateNumberValue(propName);
-  if (type.kind === ts.SyntaxKind.BooleanKeyword) return false;
+): Promise<GenerateValueResult> {
+  if (type.kind === ts.SyntaxKind.StringKeyword) return { value: generateStringValue(propName) };
+  if (type.kind === ts.SyntaxKind.NumberKeyword) return { value: generateNumberValue(propName) };
+  if (type.kind === ts.SyntaxKind.BooleanKeyword) return { value: false };
   if (ts.isFunctionTypeNode(type)) {
     // Create a named function so serialization can capture the name
     const mockFn = function mockFunction(...args: any[]) {
       console.log(`Mock function called: ${propName}`, args);
     };
     Object.defineProperty(mockFn, 'name', { value: propName });
-    return mockFn;
+    return { value: mockFn };
   }
 
   if (ts.isArrayTypeNode(type)) {
     const elementType = type.elementType;
 
     // generate the element itself (ignore propName)
-    const elementValue = await generateValueForType(elementType, "", sourceFile, currentFilePath);
+    const elementResult = await generateValueForType(elementType, "", sourceFile, currentFilePath);
 
-    return [generateDeepCopy(elementValue), generateDeepCopy(elementValue)];
+    return { value: [generateDeepCopy(elementResult.value), generateDeepCopy(elementResult.value)] };
   }
 
   if (ts.isUnionTypeNode(type)) {
     const firstType = type.types[0];
     if (firstType) return await generateValueForType(firstType, propName, sourceFile, currentFilePath);
+    return { value: null };
   }
 
   if (ts.isLiteralTypeNode(type)) {
-    if (ts.isStringLiteral(type.literal)) return type.literal.text;
-    if (ts.isNumericLiteral(type.literal)) return Number(type.literal.text);
-    if (type.literal.kind === ts.SyntaxKind.TrueKeyword) return true;
-    if (type.literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+    if (ts.isStringLiteral(type.literal)) return { value: type.literal.text };
+    if (ts.isNumericLiteral(type.literal)) return { value: Number(type.literal.text) };
+    if (type.literal.kind === ts.SyntaxKind.TrueKeyword) return { value: true };
+    if (type.literal.kind === ts.SyntaxKind.FalseKeyword) return { value: false };
+    return { value: null };
   }
 
   if (ts.isTypeReferenceNode(type)) {
     const typeName = ts.isIdentifier(type.typeName) ? type.typeName.text : "";
 
-    if (typeName === "ReactNode" || typeName === "ReactElement") return null;
-    if (typeName === "Date") return new Date();
-    if (typeName === "File") return new File(["mock content"], "mock.txt", { type: "text/plain" });
+    if (typeName === "ReactNode" || typeName === "ReactElement") return { value: null };
+    if (typeName === "Date") return { value: new Date() };
+    if (typeName === "File") return { value: new File(["mock content"], "mock.txt", { type: "text/plain" }) };
 
-    // First, try to find the interface in the current file
+    // First, try to find the interface or enum in the current file
     let interfaceDecl = findInterfaceDeclaration(typeName, sourceFile);
+    let enumDecl = findEnumDeclaration(typeName, sourceFile);
     let sourceFileToUse = sourceFile;
 
     // If not found in the current file, check imports
-    if (!interfaceDecl && currentFilePath) {
+    if (!interfaceDecl && !enumDecl && currentFilePath) {
       const importPath = findImportForType(typeName, sourceFile);
       if (importPath) {
         const resolvedPath = await resolveImportPath(importPath, currentFilePath);
@@ -207,6 +297,7 @@ async function generateValueForType(
             const importedSourceFile = await loadSourceFile(resolvedPath);
             if (importedSourceFile) {
               interfaceDecl = findInterfaceDeclaration(typeName, importedSourceFile);
+              enumDecl = findEnumDeclaration(typeName, importedSourceFile);
               sourceFileToUse = importedSourceFile;
             }
           } catch (err) {
@@ -216,20 +307,29 @@ async function generateValueForType(
       }
     }
 
+    if (enumDecl) {
+      const enumValues = getAllEnumValues(enumDecl);
+      return {
+        value: getEnumFirstValue(enumDecl),
+        enumMetadata: { values: enumValues }
+      };
+    }
+
     if (interfaceDecl) {
       const obj: Record<string, any> = {};
       for (const member of interfaceDecl.members) {
         if (ts.isPropertySignature(member) && member.name && ts.isIdentifier(member.name)) {
           const memberName = member.name.text;
           if (member.type) {
-            obj[memberName] = await generateValueForType(member.type, memberName, sourceFileToUse, currentFilePath);
+            const result = await generateValueForType(member.type, memberName, sourceFileToUse, currentFilePath);
+            obj[memberName] = result.value;
           }
         }
       }
-      return obj;
+      return { value: obj };
     }
 
-    return generateObjectValue(propName);
+    return { value: generateObjectValue(propName) };
   }
 
   if (ts.isTypeLiteralNode(type)) {
@@ -238,14 +338,15 @@ async function generateValueForType(
       if (ts.isPropertySignature(member) && member.name && ts.isIdentifier(member.name)) {
         const memberName = member.name.text;
         if (member.type) {
-          obj[memberName] = await generateValueForType(member.type, memberName, sourceFile, currentFilePath);
+          const result = await generateValueForType(member.type, memberName, sourceFile, currentFilePath);
+          obj[memberName] = result.value;
         }
       }
     }
-    return obj;
+    return { value: obj };
   }
 
-  return null;
+  return { value: null };
 }
 
 /**
@@ -317,7 +418,7 @@ function generateDeepCopy(obj: any) {
 export async function parsePropsInterface(
   filePath: string,
   interfaceName: string
-): Promise<Record<string, any>> {
+): Promise<PropsWithMetadata> {
   try {
     const sourceCode = await Bun.file(filePath).text();
     const sourceFile = ts.createSourceFile(
@@ -330,14 +431,17 @@ export async function parsePropsInterface(
     return await generateProps(sourceFile, interfaceName, filePath);
   } catch (err) {
     console.error(`Error parsing props interface from ${filePath}:`, err);
-    return {};
+    return {
+      props: {},
+      metadata: { enums: {} }
+    };
   }
 }
 
 /**
  * Serialize props for JSON transmission, converting functions to markers
  */
-export function serializeProps(props: Record<string, any>): Record<string, any> {
+export function serializeProps(propsWithMetadata: PropsWithMetadata): { props: Record<string, any>; metadata: any } {
   function serialize(value: any): any {
     if (typeof value === "function") {
       const marker = { __type: "function", __name: value.name || "anonymous" };
@@ -357,6 +461,8 @@ export function serializeProps(props: Record<string, any>): Record<string, any> 
     return value;
   }
 
-  const result = serialize(props);
-  return result;
+  return {
+    props: serialize(propsWithMetadata.props),
+    metadata: propsWithMetadata.metadata
+  };
 }

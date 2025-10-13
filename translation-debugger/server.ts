@@ -328,7 +328,7 @@ export default style;
           try {
             // Check cache first
             if (propsCache.has(componentPath)) {
-              return Response.json({ props: propsCache.get(componentPath) });
+              return Response.json(propsCache.get(componentPath));
             }
 
             // Find component in cache
@@ -339,15 +339,15 @@ export default style;
             }
 
             // Generate props if component has props interface
-            let props = {};
+            let result: any = { props: {}, metadata: { enums: {} } };
             if (component.propsInterface) {
               const generatedProps = await parsePropsInterface(componentPath, component.propsInterface);
-              props = serializeProps(generatedProps);
+              result = serializeProps(generatedProps);
               // Cache the result
-              propsCache.set(componentPath, props);
+              propsCache.set(componentPath, result);
             }
 
-            return Response.json({ props });
+            return Response.json(result);
           } catch (err: any) {
             return Response.json({ error: err.message }, { status: 500 });
           }

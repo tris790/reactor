@@ -47,7 +47,15 @@ function getTypeName(value: any): string {
 }
 
 // Props Panel Component
-function PropsPanel({ props, onPropChange }: { props: Record<string, any>, onPropChange: (key: string, value: any) => void }) {
+function PropsPanel({
+  props,
+  metadata,
+  onPropChange
+}: {
+  props: Record<string, any>,
+  metadata?: { enums: Record<string, { values: Array<{ name: string; value: string | number }> }> },
+  onPropChange: (key: string, value: any) => void
+}) {
   const [editingJson, setEditingJson] = React.useState<Record<string, string>>({});
   const [jsonErrors, setJsonErrors] = React.useState<Record<string, string>>({});
 
@@ -83,6 +91,38 @@ function PropsPanel({ props, onPropChange }: { props: Record<string, any>, onPro
   const renderPropValue = (key: string, value: any) => {
     const type = getTypeName(value);
     const isEditable = isEditableProp(value);
+    const enumMetadata = metadata?.enums?.[key];
+
+    // If this prop is an enum, render a dropdown
+    if (enumMetadata && enumMetadata.values.length > 0) {
+      return (
+        <select
+          className="prop-select"
+          value={value}
+          onChange={(e) => {
+            const enumValue = enumMetadata.values.find(v => String(v.value) === e.target.value);
+            if (enumValue) {
+              onPropChange(key, enumValue.value);
+            }
+          }}
+          style={{
+            width: "100%",
+            padding: "6px 8px",
+            background: "#1a1a1a",
+            color: "#e0e0e0",
+            border: "1px solid #333",
+            borderRadius: "4px",
+            fontSize: "13px",
+          }}
+        >
+          {enumMetadata.values.map((enumValue) => (
+            <option key={enumValue.name} value={enumValue.value}>
+              {enumValue.name} ({JSON.stringify(enumValue.value)})
+            </option>
+          ))}
+        </select>
+      );
+    }
 
     if (type === "string") {
       return (
@@ -160,6 +200,16 @@ function PropsPanel({ props, onPropChange }: { props: Record<string, any>, onPro
     return <div className="prop-value">{String(value)}</div>;
   };
 
+  const getDisplayTypeName = (key: string, value: any): string => {
+    const enumMetadata = metadata?.enums?.[key];
+    if (enumMetadata && enumMetadata.values.length > 0) {
+      // Check if it's a string enum or numeric enum
+      const firstValue = enumMetadata.values[0].value;
+      return typeof firstValue === "string" ? "string enum" : "enum";
+    }
+    return getTypeName(value);
+  };
+
   return (
     <div>
       <h2>Props</h2>
@@ -170,7 +220,7 @@ function PropsPanel({ props, onPropChange }: { props: Record<string, any>, onPro
           <div key={key} className="prop-item">
             <div className="prop-label">
               <span>{key}</span>
-              <span className="prop-type">{getTypeName(value)}</span>
+              <span className="prop-type">{getDisplayTypeName(key, value)}</span>
             </div>
             {renderPropValue(key, value)}
           </div>
@@ -196,9 +246,11 @@ async function render() {
     const propsResponse = await fetch(`/api/component-props?path=${encodeURIComponent(componentPath)}`);
     const propsData = await propsResponse.json();
     const serializedProps = propsData.props || {};
+    const metadata = propsData.metadata || { enums: {} };
     const props = deserializeProps(serializedProps);
 
     console.log("Props loaded:", props);
+    console.log("Metadata loaded:", metadata);
 
     // Dynamic import of the component
     // Extract just the src-relative path for the server
@@ -242,7 +294,7 @@ async function render() {
       return (
         <>
           <div id="props-panel">
-            <PropsPanel props={currentProps} onPropChange={handlePropChange} />
+            <PropsPanel props={currentProps} metadata={metadata} onPropChange={handlePropChange} />
           </div>
           <div id="preview-container">
             <div id="preview-root">

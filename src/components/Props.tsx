@@ -6,6 +6,18 @@ export interface User {
   email: string;
 }
 
+export enum Status {
+  Active = "active",
+  Inactive = "inactive",
+  Pending = "pending",
+}
+
+export enum Priority {
+  Low = 0,
+  Medium = 1,
+  High = 2,
+}
+
 export interface PropsTestProps {
   // Primitive types
   title: string;
@@ -15,6 +27,10 @@ export interface PropsTestProps {
   // Complex types
   user: User;
   tags: string[];
+
+  // Enums
+  status: Status;
+  priority: Priority;
 
   // Functions
   onClick: () => void;
@@ -26,6 +42,8 @@ export default function Props({
   isEnabled,
   user,
   tags,
+  status,
+  priority,
   onClick,
 }: PropsTestProps) {
   return (
@@ -70,6 +88,16 @@ export default function Props({
               <li key={i}>{tag}</li>
             ))}
           </ul>
+        </div>
+      </section>
+
+      <section className="prop-section">
+        <h2>Enum Props</h2>
+        <div className="prop-display">
+          <strong>status (string enum):</strong> {status}
+        </div>
+        <div className="prop-display">
+          <strong>priority (numeric enum):</strong> {priority}
         </div>
       </section>
 
