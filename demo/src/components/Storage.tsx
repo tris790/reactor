@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "../context/TranslationContext";
+import "./Settings.css";
 
 export default function Storage() {
   const { t } = useTranslation();

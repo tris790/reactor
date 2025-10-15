@@ -311,13 +311,19 @@ export function TranslationExplorer() {
       // Update local cache - force re-render by creating new object
       setCache({ ...data.cache });
 
+      // Update translations if they were returned
+      if (data.translations) {
+        setTranslations({ ...data.translations });
+        console.log("✅ Translations reloaded");
+      }
+
       // Clear any selections to show the updated list
       setSelectedKey(null);
       setSelectedComponent(null);
       setSearchQuery("");
 
       // Show success feedback
-      alert(`Cache refreshed!\n\n${data.stats.components} components analyzed\n${data.stats.translationUsages} translation usages found`);
+      alert(`Cache refreshed!\n\n${data.stats.components} components analyzed\n${data.stats.translationUsages} translation usages found\n${data.stats.translationKeys} translation keys loaded`);
     } catch (err) {
       console.error("Error refreshing cache:", err);
       alert(`Error refreshing cache: ${err}`);
@@ -327,8 +333,22 @@ export function TranslationExplorer() {
   };
 
   const handleBack = () => {
-    // Use browser back button instead of directly manipulating state
-    window.history.back();
+    isNavigatingRef.current = true;
+
+    if (selectedComponent) {
+      // Going back from component view
+      if (navigationMode === "by-string" && selectedKey) {
+        // In by-string mode with a key selected, go back to component list
+        setSelectedComponent(null);
+      } else {
+        // In by-component mode, go back to component list
+        setSelectedComponent(null);
+        setSelectedKey(null);
+      }
+    } else if (selectedKey) {
+      // Going back from key detail view to translation list
+      setSelectedKey(null);
+    }
   };
 
   // Loading state

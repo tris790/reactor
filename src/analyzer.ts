@@ -159,7 +159,7 @@ function getPropsInterface(sourceFile: ts.SourceFile, componentName: string): st
 }
 
 /**
- * Find all calls to t("key") in a source file
+ * Find all calls to t("key") and <FormattedMessage id="key" /> in a source file
  */
 function findTranslationKeys(sourceFile: ts.SourceFile): TranslationUsage[] {
   const usages: TranslationUsage[] = [];
@@ -190,6 +190,49 @@ function findTranslationKeys(sourceFile: ts.SourceFile): TranslationUsage[] {
       }
     }
 
+    // Look for <FormattedMessage id="key" /> pattern
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tagName = node.tagName;
+
+      // Check if it's FormattedMessage
+      if (ts.isIdentifier(tagName) && tagName.text === "FormattedMessage") {
+        // Look for the 'id' attribute
+        const idAttr = node.attributes.properties.find(attr => {
+          if (ts.isJsxAttribute(attr) && ts.isIdentifier(attr.name)) {
+            return attr.name.text === "id";
+          }
+          return false;
+        });
+
+        if (idAttr && ts.isJsxAttribute(idAttr) && idAttr.initializer) {
+          let key: string | null = null;
+
+          // Handle id="key" (string literal)
+          if (ts.isStringLiteral(idAttr.initializer)) {
+            key = idAttr.initializer.text;
+          }
+          // Handle id={"key"} or id={'key'} (JSX expression with string literal)
+          else if (ts.isJsxExpression(idAttr.initializer) && idAttr.initializer.expression) {
+            if (ts.isStringLiteral(idAttr.initializer.expression)) {
+              key = idAttr.initializer.expression.text;
+            }
+          }
+
+          if (key) {
+            const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+
+            usages.push({
+              key,
+              componentPath: sourceFile.fileName,
+              componentName,
+              line: line + 1,
+              column: character + 1,
+            });
+          }
+        }
+      }
+    }
+
     ts.forEachChild(node, visit);
   }
 
@@ -200,11 +243,11 @@ function findTranslationKeys(sourceFile: ts.SourceFile): TranslationUsage[] {
 /**
  * Analyze all source files and build the index
  */
-export async function analyzeProject(projectRoot: string): Promise<AnalysisCache> {
+export async function analyzeProject(sourceDir: string): Promise<AnalysisCache> {
   console.log("🔍 Analyzing project for translation usage...");
 
   const startTime = Date.now();
-  const sourceFiles = await findSourceFiles(join(projectRoot, "src"));
+  const sourceFiles = await findSourceFiles(sourceDir);
 
   console.log(`Found ${sourceFiles.length} source files`);
 

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useTranslation } from "../../context/TranslationContext";
+import "./VideoUpload.css";
 
 interface VideoUploadProps {
   onUpload: (title: string, file: File) => void;

@@ -1,9 +1,12 @@
 {
   "app.title": "Service de Gestion Vidéo",
   "app.subtitle": "Gérez et diffusez votre contenu vidéo",
+  "edgecase.hook": "Ceci est traduit en utilisant le hook",
+  "edgecase.formattedMessage": "Ceci est traduit en utilisant le <FormattedMessage/>",
   "nav.library": "Bibliothèque",
   "nav.settings": "Paramètres",
   "nav.storage": "Stockage",
+  "nav.edgecase": "Cas Limite",
   "library.title": "Bibliothèque Vidéo",
   "upload.title": "Titre de la vidéo",
   "upload.chooseFile": "Choisir un fichier",

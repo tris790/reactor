@@ -7,12 +7,14 @@ import { watch } from "node:fs";
 import { join } from "node:path";
 import { analyzeProject, loadCache, saveCache, type AnalysisCache } from "./analyzer";
 import { parsePropsInterface, serializeProps } from "./prop-generator";
+import { loadConfig, getAbsolutePaths, type TranslationDebuggerConfig } from "./config";
 import index from "./index.html";
 
 const PROJECT_ROOT = join(import.meta.dir, "..");
 const PORT = 3456;
 
 // Global state
+let config: TranslationDebuggerConfig;
 let analysisCache: AnalysisCache | null = null;
 let translations: Record<string, Record<string, any>> = {};
 const propsCache = new Map<string, Record<string, any>>(); // Cache for generated props
@@ -22,13 +24,15 @@ const propsCache = new Map<string, Record<string, any>>(); // Cache for generate
  */
 async function loadTranslations() {
   try {
-    const enFile = Bun.file(join(PROJECT_ROOT, "translations/en.json"));
-    const frFile = Bun.file(join(PROJECT_ROOT, "translations/fr.json"));
+    const { translationsDir } = getAbsolutePaths(config);
 
-    translations = {
-      en: await enFile.json(),
-      fr: await frFile.json(),
-    };
+    translations = {};
+    for (const locale of config.locales) {
+      const translationFile = Bun.file(join(translationsDir, `${locale}.json`));
+      if (await translationFile.exists()) {
+        translations[locale] = await translationFile.json();
+      }
+    }
 
     console.log("✅ Loaded translations");
   } catch (err) {
@@ -40,12 +44,14 @@ async function loadTranslations() {
  * Initialize analysis cache
  */
 async function initializeCache() {
+  const { sourceDir } = getAbsolutePaths(config);
+
   // Try to load existing cache
   analysisCache = await loadCache(PROJECT_ROOT);
 
   if (!analysisCache) {
     // Build fresh cache
-    analysisCache = await analyzeProject(PROJECT_ROOT);
+    analysisCache = await analyzeProject(sourceDir);
     await saveCache(PROJECT_ROOT, analysisCache);
   }
 }
@@ -58,8 +64,12 @@ const PIN = "pin=v135";
 
 /**
  * Transpile TypeScript/JSX code and rewrite React imports to use CDN
+ * @param code Source code to transpile
+ * @param loader Type of loader
+ * @param includeJsxRuntime Whether to include JSX runtime import
+ * @param sourcePath Absolute path of the source file (for resolving relative imports)
  */
-async function transpileForBrowser(code: string, loader: 'tsx' | 'ts' | 'jsx' | 'js', includeJsxRuntime: boolean = true): Promise<string> {
+async function transpileForBrowser(code: string, loader: 'tsx' | 'ts' | 'jsx' | 'js', includeJsxRuntime: boolean = true, sourcePath?: string): Promise<string> {
   const transpiler = new Bun.Transpiler({
     loader,
     target: 'browser',
@@ -69,7 +79,7 @@ async function transpileForBrowser(code: string, loader: 'tsx' | 'ts' | 'jsx' | 
 
   // Add JSX runtime import at the top if needed
   if (includeJsxRuntime) {
-    const jsxImport = `import { jsx, jsxs, Fragment } from "${CDN_BASE}${REACT_VERSION}/jsx-runtime?${PIN}";\n`;
+    const jsxImport = `import { jsx, jsxs, Fragment} from "${CDN_BASE}${REACT_VERSION}/jsx-runtime?${PIN}";\n`;
     transpiledCode = jsxImport + transpiledCode;
   }
 
@@ -84,6 +94,33 @@ async function transpileForBrowser(code: string, loader: 'tsx' | 'ts' | 'jsx' | 
   transpiledCode = transpiledCode.replace(/jsx_\w+/g, 'jsx');
   transpiledCode = transpiledCode.replace(/jsxs_\w+/g, 'jsxs');
   transpiledCode = transpiledCode.replace(/Fragment_\w+/g, 'Fragment');
+
+  // Rewrite relative imports to absolute paths with /~ prefix to avoid browser hostname confusion
+  // (if sourcePath is provided)
+  if (sourcePath) {
+    const { dirname } = await import('node:path');
+    const sourceDir = dirname(sourcePath);
+
+    // Match ES module imports: import X from "./path"
+    transpiledCode = transpiledCode.replace(
+      /from\s+['"](\.\.?\/[^'"]+)['"]/g,
+      (match, relativePath) => {
+        const absolutePath = join(sourceDir, relativePath);
+        // Prefix with /~ to avoid browser treating it as hostname
+        return `from "/~${absolutePath}"`;
+      }
+    );
+
+    // Match side-effect imports (like CSS): import "./path"
+    transpiledCode = transpiledCode.replace(
+      /import\s+['"](\.\.?\/[^'"]+)['"]/g,
+      (match, relativePath) => {
+        const absolutePath = join(sourceDir, relativePath);
+        // Prefix with /~ to avoid browser treating it as hostname
+        return `import "/~${absolutePath}"`;
+      }
+    );
+  }
 
   return transpiledCode;
 }
@@ -112,18 +149,17 @@ async function resolveFile(basePath: string, extensions: string[]): Promise<{ fi
  * Watch for file changes and update cache incrementally
  */
 function watchFiles() {
-  const srcDir = join(PROJECT_ROOT, "src");
-  const translationsDir = join(PROJECT_ROOT, "translations");
+  const { sourceDir, translationsDir } = getAbsolutePaths(config);
 
   // Watch source files
-  watch(srcDir, { recursive: true }, async (event, filename) => {
+  watch(sourceDir, { recursive: true }, async (event, filename) => {
     if (filename && /\.(tsx?|jsx?)$/.test(filename)) {
       console.log(`📝 File changed: ${filename}, rebuilding cache...`);
 
       // Clear props cache since components may have changed
       propsCache.clear();
 
-      analysisCache = await analyzeProject(PROJECT_ROOT);
+      analysisCache = await analyzeProject(sourceDir);
       await saveCache(PROJECT_ROOT, analysisCache);
 
       console.log(`✅ Cache updated`);
@@ -147,6 +183,13 @@ function watchFiles() {
  */
 async function start() {
   console.log("🚀 Starting Translation Debugger Server...\n");
+
+  // Load configuration
+  config = await loadConfig(PROJECT_ROOT);
+  console.log(`📝 Config loaded:`);
+  console.log(`   Source dir: ${config.sourceDir}`);
+  console.log(`   Translations dir: ${config.translationsDir}`);
+  console.log(`   Locales: ${config.locales.join(", ")}\n`);
 
   // Initialize
   await loadTranslations();
@@ -222,47 +265,63 @@ async function start() {
         },
       },
 
-      // Serve translations as ES modules
-      "/translations/**": {
+      // Catch-all route to serve source files and translations
+      "/**": {
         GET: async (req) => {
           try {
             const url = new URL(req.url);
-            const pathPart = url.pathname.replace(/^\//, '');
-            const filePath = join(PROJECT_ROOT, pathPart);
+            let requestPath = url.pathname; // Keep the leading slash
 
-            console.log("Serving translation:", filePath);
-
-            const file = Bun.file(filePath);
-            if (await file.exists()) {
-              const jsonContent = await file.json();
-              const jsCode = `export default ${JSON.stringify(jsonContent, null, 2)};`;
-
-              return new Response(jsCode, {
-                headers: {
-                  "Content-Type": "application/javascript",
-                  "Cache-Control": "no-cache",
-                },
-              });
+            // Handle /~ prefixed paths (strip the ~ but keep the leading /)
+            if (requestPath.startsWith('/~')) {
+              requestPath = requestPath.substring(2); // Remove /~, leaving just the path
+              requestPath = '/' + requestPath; // Add back single leading slash
             }
-            return new Response("Translation file not found", { status: 404 });
-          } catch (err: any) {
-            console.error("Error serving translation:", err);
-            return new Response(`Error: ${err.message}`, { status: 500 });
-          }
-        },
-      },
 
-      // Serve all source files (CSS, JS, TS, TSX, etc.)
-      "/src/**": {
-        GET: async (req) => {
-          try {
-            const url = new URL(req.url);
-            const pathPart = url.pathname.replace(/^\//, ''); // Remove leading slash
-            const filePath = join(PROJECT_ROOT, pathPart);
+            // requestPath should now be an absolute filesystem path like /home/user/repo/js/demo/src/...
+            const filePath = requestPath;
 
             console.log("Requested:", filePath);
 
-            // Try to resolve file with various extensions
+            // Check if it's a JSON file (translation or any other JSON)
+            if (filePath.endsWith('.json')) {
+              const file = Bun.file(filePath);
+              if (await file.exists()) {
+                const jsonContent = await file.json();
+                const jsCode = `export default ${JSON.stringify(jsonContent, null, 2)};`;
+
+                console.log("  → Serving JSON as JS module");
+                return new Response(jsCode, {
+                  headers: {
+                    "Content-Type": "application/javascript",
+                    "Cache-Control": "no-cache",
+                  },
+                });
+              }
+            }
+
+            // Check if it's a CSS file first (before trying to resolve with extensions)
+            if (filePath.endsWith('.css')) {
+              const file = Bun.file(filePath);
+              if (await file.exists()) {
+                const cssContent = await file.text();
+                const jsCode = `
+const style = document.createElement('style');
+style.textContent = ${JSON.stringify(cssContent)};
+document.head.appendChild(style);
+export default style;
+`;
+                console.log("  → Serving CSS as JS module");
+                return new Response(jsCode, {
+                  headers: {
+                    "Content-Type": "application/javascript",
+                    "Cache-Control": "no-cache",
+                  },
+                });
+              }
+            }
+
+            // Try to resolve as a source file
             const resolved = await resolveFile(filePath, ['.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts', '/index.jsx', '/index.js']);
 
             if (!resolved) {
@@ -272,31 +331,14 @@ async function start() {
 
             console.log("  → Resolved to:", resolved.path);
 
-            // Handle CSS files - convert to JS module that injects styles
-            if (resolved.path.endsWith('.css')) {
-              const cssContent = await resolved.file.text();
-              const jsCode = `
-const style = document.createElement('style');
-style.textContent = ${JSON.stringify(cssContent)};
-document.head.appendChild(style);
-export default style;
-`;
-              return new Response(jsCode, {
-                headers: {
-                  "Content-Type": "application/javascript",
-                  "Cache-Control": "no-cache",
-                },
-              });
-            }
-
             // Handle JavaScript/TypeScript files - transpile them
             if (resolved.path.match(/\.(tsx?|jsx?)$/)) {
               const loader = resolved.path.endsWith('.tsx') ? 'tsx' :
-                            resolved.path.endsWith('.ts') ? 'ts' :
-                            resolved.path.endsWith('.jsx') ? 'jsx' : 'js';
+                resolved.path.endsWith('.ts') ? 'ts' :
+                  resolved.path.endsWith('.jsx') ? 'jsx' : 'js';
 
               const includeJsxRuntime = resolved.path.match(/\.(tsx|jsx)$/) !== null;
-              const code = await transpileForBrowser(await resolved.file.text(), loader, includeJsxRuntime);
+              const code = await transpileForBrowser(await resolved.file.text(), loader, includeJsxRuntime, resolved.path);
 
               return new Response(code, {
                 headers: {
@@ -389,17 +431,45 @@ export default style;
         },
       },
 
+      // API: Get configuration
+      "/api/config": {
+        GET: (req) => {
+          const { sourceDir, translationsDir } = getAbsolutePaths(config);
+          return Response.json({
+            sourceDir,
+            translationsDir,
+            locales: config.locales,
+          });
+        },
+      },
+
       // API: Refresh cache
       "/api/refresh-cache": {
         POST: async (req) => {
           try {
+            const { sourceDir, translationsDir } = getAbsolutePaths(config);
             console.log("🔄 Manual cache refresh requested...");
 
-            // Clear props cache
-            propsCache.clear();
+            // Step 1: Delete cache file
+            const cachePath = join(PROJECT_ROOT, "tmp/.translation-cache.json");
+            const cacheFile = Bun.file(cachePath);
+            if (await cacheFile.exists()) {
+              await Bun.$`rm ${cachePath}`.quiet();
+              console.log("🗑️  Deleted cache file");
+            }
 
-            // Rebuild analysis cache
-            analysisCache = await analyzeProject(PROJECT_ROOT);
+            // Step 2: Clear props cache
+            propsCache.clear();
+            console.log("🗑️  Cleared props cache");
+
+            // Step 3: Reload translation files
+            await loadTranslations();
+            console.log("🌍 Reloaded translation files");
+
+            // Step 4: Rebuild analysis cache from source files
+            analysisCache = await analyzeProject(sourceDir);
+
+            // Step 5: Save new cache
             await saveCache(PROJECT_ROOT, analysisCache);
 
             console.log("✅ Cache refreshed successfully");
@@ -407,9 +477,11 @@ export default style;
             return Response.json({
               success: true,
               cache: analysisCache,
+              translations,
               stats: {
                 components: analysisCache.components.length,
-                translationUsages: analysisCache.translationUsages.length
+                translationUsages: analysisCache.translationUsages.length,
+                translationKeys: Object.keys(translations.en || {}).length
               }
             });
           } catch (err: any) {

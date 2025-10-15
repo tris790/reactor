@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/server.ts",
-    "demo": "bun --hot demo/server.ts"
+    "dev": "bun --hot server.ts"
   },
   "dependencies": {
     "react": "^19",

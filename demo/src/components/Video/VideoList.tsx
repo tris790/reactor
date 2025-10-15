@@ -1,6 +1,7 @@
 import React from "react";
 import type { Video } from "../../App";
 import { useTranslation } from "../../context/TranslationContext";
+import "./VideoList.css";
 
 interface VideoListProps {
   videos: Video[];

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import enTranslations from "../../translations/en.json";
-import frTranslations from "../../translations/fr.json";
+import enTranslations from "../translations/en.json";
+import frTranslations from "../translations/fr.json";
 
 type Language = "en" | "fr";
 type Translations = Record<string, string>;

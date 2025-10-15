@@ -1,9 +1,12 @@
 {
   "app.title": "Video Management Service",
   "app.subtitle": "Manage and stream your video content",
+  "edgecase.hook": "This is translated using hook",
+  "edgecase.formattedMessage": "This is translated using <FormattedMessage/>",
   "nav.library": "Library",
   "nav.settings": "Settings",
   "nav.storage": "Storage",
+  "nav.edgecase": "Edge Case",
   "library.title": "Video Library",
   "upload.title": "Video title",
   "upload.chooseFile": "Choose file",

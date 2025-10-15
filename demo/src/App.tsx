@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import "./index.css";
+import "./global.css";
+import "./App.css";
 import Navigation from "./components/Navigation";
 import VideoList from "./components/Video/VideoList";
 import VideoUpload from "./components/Video/VideoUpload";
@@ -7,6 +8,7 @@ import VideoPlayer from "./components/Video/VideoPlayer";
 import Settings from "./components/Settings";
 import Storage from "./components/Storage";
 import Props from "./components/Props";
+import EdgeCase from "./components/EdgeCase";
 import { useTranslation } from "./context/TranslationContext";
 
 export interface Video {
@@ -51,7 +53,7 @@ function generateThumbnail(seed: number): string {
 
 export function App() {
   const { t } = useTranslation();
-  const [activePage, setActivePage] = useState<"library" | "settings" | "storage" | "props">("library");
+  const [activePage, setActivePage] = useState<"library" | "settings" | "storage" | "props" | "edgecase">("library");
   const [videos, setVideos] = useState<Video[]>([
     {
       id: "1",
@@ -138,6 +140,8 @@ export function App() {
               tags={["react", "typescript", "bun"]}
               onClick={() => console.log("onClick called")}
             />
+          ) : activePage === "edgecase" ? (
+            <EdgeCase />
           ) : (
             <Settings />
           )}

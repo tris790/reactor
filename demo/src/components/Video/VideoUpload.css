@@ -1,0 +1,81 @@
+/* Video Upload - Minimal Design */
+.video-upload {
+  background: #2a2a2a;
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.video-upload form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.upload-title-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.upload-title-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.upload-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-label {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #999;
+  font-size: 0.85rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.2s;
+}
+
+.file-label:hover {
+  border-color: #667eea;
+}
+
+.upload-button {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.upload-button:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.upload-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

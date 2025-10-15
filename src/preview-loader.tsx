@@ -5,7 +5,6 @@
 
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { TranslationProvider } from "../src/context/TranslationContext";
 
 // Deserialize props (convert function markers back to functions)
 function deserializeProps(props: any): any {
@@ -242,6 +241,11 @@ async function render() {
 
     console.log("⚡ Loading component:", componentPath);
 
+    // Fetch configuration to know the source directory
+    const configResponse = await fetch("/api/config");
+    const config = await configResponse.json();
+    console.log("Config loaded:", config);
+
     // Fetch props (lazy loaded)
     const propsResponse = await fetch(`/api/component-props?path=${encodeURIComponent(componentPath)}`);
     const propsData = await propsResponse.json();
@@ -253,16 +257,12 @@ async function render() {
     console.log("Metadata loaded:", metadata);
 
     // Dynamic import of the component
-    // Extract just the src-relative path for the server
+    // Use /~ prefix to avoid browser hostname confusion with absolute paths
     let importPath = componentPath;
 
-    // If it's an absolute file system path, extract the src/ part
-    if (componentPath.includes('/src/')) {
-      importPath = componentPath.substring(componentPath.indexOf('/src/'));
-    }
-    // If it doesn't start with /, add it
-    if (!importPath.startsWith('/')) {
-      importPath = '/' + importPath;
+    // Add /~ prefix if it's an absolute filesystem path
+    if (importPath.startsWith('/') && !importPath.startsWith('/~')) {
+      importPath = `/~${importPath}`;
     }
 
     console.log("Importing from:", importPath);
@@ -275,6 +275,11 @@ async function render() {
     }
 
     console.log("✓ Component loaded!");
+
+    // Dynamically import TranslationProvider with /~ prefix
+    const translationContextPath = `/~${config.sourceDir}/context/TranslationContext`;
+    const translationModule = await import(/* @vite-ignore */ translationContextPath);
+    const TranslationProvider = translationModule.TranslationProvider;
 
     // Create a single root for the entire app container
     const appRoot = createRoot(document.getElementById("app-container")!);

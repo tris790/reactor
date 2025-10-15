@@ -1,9 +1,10 @@
 import React from "react";
 import { useTranslation } from "../context/TranslationContext";
+import "./Navigation.css";
 
 interface NavigationProps {
-  activePage: "library" | "settings" | "storage" | "props";
-  onNavigate: (page: "library" | "settings" | "storage" | "props") => void;
+  activePage: "library" | "settings" | "storage" | "props" | "edgecase";
+  onNavigate: (page: "library" | "settings" | "storage" | "props" | "edgecase") => void;
 }
 
 export default function Navigation({ activePage, onNavigate }: NavigationProps) {
@@ -100,6 +101,29 @@ export default function Navigation({ activePage, onNavigate }: NavigationProps) 
             <polyline points="8 6 2 12 8 18" />
           </svg>
           <span className="nav-label">Props Test</span>
+        </button>
+
+        <button
+          className={`nav-item ${activePage === "edgecase" ? "active" : ""}`}
+          onClick={() => onNavigate("edgecase")}
+          title={t("nav.edgecase")}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+          <span className="nav-label">{t("nav.edgecase")}</span>
         </button>
       </div>
     </nav>
