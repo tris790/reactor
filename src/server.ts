@@ -105,7 +105,9 @@ async function transpileForBrowser(code: string, loader: 'tsx' | 'ts' | 'jsx' | 
     transpiledCode = transpiledCode.replace(
       /from\s+['"](\.\.?\/[^'"]+)['"]/g,
       (match, relativePath) => {
-        const absolutePath = join(sourceDir, relativePath);
+        let absolutePath = join(sourceDir, relativePath);
+        // Normalize Windows backslashes to forward slashes for URL safety
+        absolutePath = absolutePath.replace(/\\/g, "/");
         // Prefix with /~ to avoid browser treating it as hostname
         return `from "/~${absolutePath}"`;
       }
@@ -115,7 +117,8 @@ async function transpileForBrowser(code: string, loader: 'tsx' | 'ts' | 'jsx' | 
     transpiledCode = transpiledCode.replace(
       /import\s+['"](\.\.?\/[^'"]+)['"]/g,
       (match, relativePath) => {
-        const absolutePath = join(sourceDir, relativePath);
+        let absolutePath = join(sourceDir, relativePath);
+        absolutePath = absolutePath.replace(/\\/g, "/");
         // Prefix with /~ to avoid browser treating it as hostname
         return `import "/~${absolutePath}"`;
       }
@@ -203,6 +206,12 @@ async function start() {
     port: PORT,
     routes: {
       "/": index,
+      // Quiet favicon (optional): return 204 to silence browser requests
+      "/favicon.ico": {
+        GET() {
+          return new Response(null, { status: 204 });
+        },
+      },
       "/preview-component": {
         GET: async (req) => {
           const htmlPath = join(import.meta.dir, "preview-v2.html");
@@ -275,8 +284,20 @@ async function start() {
             // Handle /~ prefixed paths (strip the ~ but keep the leading /)
             if (requestPath.startsWith('/~')) {
               requestPath = requestPath.substring(2); // Remove /~, leaving just the path
-              requestPath = '/' + requestPath; // Add back single leading slash
+              if (!requestPath.startsWith('/')) {
+                requestPath = '/' + requestPath; // Ensure single leading slash
+              }
             }
+
+            // Windows drive letter normalization: /C:/repo/... should map to C:/repo/...
+            // We'll allow both /C:/ and /c:/ forms; do not lowercase the drive to preserve actual path.
+            const driveLetterMatch = requestPath.match(/^\/([A-Za-z]:)(\/.*)/);
+            if (driveLetterMatch && driveLetterMatch[1] && driveLetterMatch[2]) {
+              requestPath = `${driveLetterMatch[1]}${driveLetterMatch[2]}`;
+            }
+
+            // Convert any remaining backslashes to forward slashes for consistency before file resolution
+            requestPath = requestPath.replace(/\\/g, '/');
 
             // requestPath should now be an absolute filesystem path like /home/user/repo/js/demo/src/...
             const filePath = requestPath;

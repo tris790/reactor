@@ -201,10 +201,12 @@ function PropsPanel({
 
   const getDisplayTypeName = (key: string, value: any): string => {
     const enumMetadata = metadata?.enums?.[key];
-    if (enumMetadata && enumMetadata.values.length > 0) {
+    if (enumMetadata && Array.isArray(enumMetadata.values) && enumMetadata.values.length > 0) {
       // Check if it's a string enum or numeric enum
-      const firstValue = enumMetadata.values[0].value;
-      return typeof firstValue === "string" ? "string enum" : "enum";
+      const firstValue = enumMetadata.values[0]?.value;
+      if (firstValue !== undefined) {
+        return typeof firstValue === "string" ? "string enum" : "enum";
+      }
     }
     return getTypeName(value);
   };
@@ -260,10 +262,27 @@ async function render() {
     // Use /~ prefix to avoid browser hostname confusion with absolute paths
     let importPath = componentPath;
 
-    // Add /~ prefix if it's an absolute filesystem path
+    // Normalize Windows drive letter absolute paths:
+    // 1. Backslash form: C:\\repo\\path -> /C:/repo/path
+    // 2. Already forward form: C:/repo/path -> /C:/repo/path
+    if (/^[A-Za-z]:\\/.test(importPath)) {
+      importPath = importPath.replace(/\\/g, "/");
+      importPath = "/" + importPath; // ensure leading slash
+    } else if (/^[A-Za-z]:\//.test(importPath)) {
+      // Already forward-slashed absolute path without leading slash
+      importPath = "/" + importPath;
+    }
+
+    // Also normalize any remaining backslashes (defensive)
+    importPath = importPath.replace(/\\/g, "/");
+
+    // Add /~ prefix if it's an absolute filesystem path (now starting with /)
     if (importPath.startsWith('/') && !importPath.startsWith('/~')) {
       importPath = `/~${importPath}`;
     }
+
+    // Remove any accidental duplicate /~ prefixes
+    importPath = importPath.replace(/(\/~)+/g, "/~");
 
     console.log("Importing from:", importPath);
 
@@ -290,7 +309,7 @@ async function render() {
 
       const handlePropChange = (key: string, value: any) => {
         console.log(`Prop changed: ${key} =`, value);
-        setCurrentProps(prev => ({
+        setCurrentProps((prev: Record<string, any>) => ({
           ...prev,
           [key]: value
         }));
@@ -317,10 +336,24 @@ async function render() {
     console.log("✓ Component rendered!");
   } catch (error: any) {
     console.error("❌ Error:", error);
-    document.getElementById("preview-root")!.innerHTML = `
-      <div style="background: #ff4444; color: white; padding: 20px; border-radius: 8px; margin: 20px;">
-        <h2>Error Loading Component</h2>
-        <pre style="white-space: pre-wrap;">${error.message}\n\n${error.stack || ""}</pre>
+    const target = document.getElementById("preview-root") || (() => {
+      // Fallback: create a container if it doesn't exist yet
+      const container = document.createElement("div");
+      container.id = "preview-root";
+      document.body.appendChild(container);
+      return container;
+    })();
+
+    target.innerHTML = `
+      <div style="background: #ff4444; color: white; padding: 20px; border-radius: 8px; margin: 20px; font-family: system-ui, sans-serif;">
+        <h2 style="margin-top:0; font-size:18px;">Error Loading Component</h2>
+        <div style="font-size:13px; line-height:1.4;">
+          <strong>Message:</strong> ${error.message}
+        </div>
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer;">Stack Trace</summary>
+          <pre style="white-space: pre-wrap; font-size:11px; background:#000; padding:10px; border-radius:4px; max-height:240px; overflow:auto;">${error.stack || "<no stack>"}</pre>
+        </details>
       </div>
     `;
   }
